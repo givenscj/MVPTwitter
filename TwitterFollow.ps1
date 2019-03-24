@@ -333,21 +333,11 @@ function GetUserId($username)
 
     $url = "https://twitter.com/$username";
 
+    $headers.Add("Origin", "https://twitter.com");
+    $results = DoGet $url $global:authCookies;
+
     try
-    {
-        $results = DoGet $url $global:authCookies;            
-
-        if (!$global:apiBearerToken -or !$global:csrfToken)
-        {
-            #get the JS file with the bearer token in it...
-            $initEnId = ParseValue $results "rel=`"preload`" href=`"https://abs.twimg.com/k/en/init.en." "`.js";
-            $initEnId = "https://abs.twimg.com/k/en/init.en.$initEnId.js";
-
-            $js = DoGet $initEnId $global:authCookies;
-            $global:apiBearerToken = ParseValue $js "e.a=`"" "`"";        
-            $global:csrfToken = ParseValue $global:strCookies "ct0=" ";"        
-        }
-        
+    {   
         $userId = ParseValue $results "role=`"navigation`" data-user-id=`"" "`""
 
         #return the userId...
@@ -536,6 +526,7 @@ function UnfollowUser($userId, $name)
 
     $global:headers.add("X-Requested-With","XMLHttpRequest");
     $global:headers.add("DNT","1");    
+    $global:headers.add("Origin","https://twitter.com");    
 
     $post = "authenticity_token=" + $global:pageAuthToken + "&challenges_passed=false&handles_challenges=1&user_id=$userId"
     $response = DoPost "https://twitter.com/i/user/unfollow" $post $global:authCookies
@@ -569,6 +560,7 @@ function FollowUser($userId, $name)
 
     $global:headers.add("X-Requested-With","XMLHttpRequest");
     $global:headers.add("DNT","1");    
+    $global:headers.add("Origin","https://twitter.com");    
 
     $post = "authenticity_token=" + $global:pageAuthToken + "&challenges_passed=false&handles_challenges=1&user_id=$userId"
     $response = DoPost "https://twitter.com/i/user/follow" $post $global:authCookies
@@ -588,6 +580,7 @@ function SendDirectMessage($name, $message)
     $global:headers.add("X-Twitter-Active-User","yes");
     $global:headers.add("X-Requested-With","XMLHttpRequest");
     $global:headers.add("DNT","1");
+    $global:headers.add("Origin","https://twitter.com");    
 
     $convoId = $userId.tostring() + "-" + $targetuserId.tostring();
 
@@ -623,11 +616,14 @@ function SetCookie()
     $global:authCookies += "guest_id=" + $global:guestId + "; "
     $global:authCookies += "twid=" + $global:twid + "; "
     $global:authCookies += "ct0=" + $global:csrfToken + "; "
-    $global:authCookies += "auth_token=" + $global:loginAuthToken
+    $global:authCookies += "auth_token=" + $global:loginAuthToken + "; "
+    $global:authCookies += "personalization_id=" + $global:personalId;
 }
 
 function Login($username, $password)
 {    
+    write-host "NOTE: Twitter will only let you login 10 times in one hour before you are throttled!" -BackgroundColor Yellow;
+
     $global:csrfToken = $null;
     $global:apiBearerToken = $null;
 
@@ -661,6 +657,7 @@ function Login($username, $password)
         $code = Read-Host 'What is the sms verification code?';
 
         $auth_token = ParseValue $response "authenticity_token`" value=`"" "`"";
+        $global:csrfToken = $auth_token;
         $challengeId = ParseValue $response "challenge_id`" value=`"" "`"";
         $global:userId = ParseValue $response "user_id`" value=`"" "`"";
 
@@ -676,13 +673,26 @@ function Login($username, $password)
         $global:twid = ParseValue $global:strCookies "twid=" ";"
         $global:kdt = ParseValue $global:strCookies "kdt=" ";"
         $global:session = ParseValue $global:strCookies "_twitter_sess=" ";"
+        $global:personalId = ParseValue $global:strCookies "personalization_id=" ";"
     }
     catch 
     {
         write-host $_.Exception.Message;
     }
 
-    SetCookie
+    SetCookie;
+
+    #track down our bearer token...
+    $headers.Add("Origin", "https://twitter.com");
+    $global:Referer  = "https://twitter.com/account/login_verification?platform=web&user_id=$global:userId&challenge_type=Sms&challenge_id=$challengeId&remember_me=false&redirect_after_login_verification=%2F";
+    $html = DoGet "https://twitter.com" $global:authCookies;
+    
+    #get the JS file with the bearer token in it...
+    $initEnId = ParseValue $html "rel=`"preload`" href=`"https://abs.twimg.com/k/en/init.en." ".js";
+    $initEnId = "https://abs.twimg.com/k/en/init.en.$initEnId.js";
+
+    $js = DoGet $initEnId $global:authCookies;
+    $global:apiBearerToken = ParseValue $js "t.a=`"" "`"";        
 }
 
 function StartSession()
